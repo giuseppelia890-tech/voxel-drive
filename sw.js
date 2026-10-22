@@ -1,7 +1,13 @@
 /* Voxel Drive: Infinite Horizon — service worker */
-const CACHE = 'voxel-drive-v3';
+const CACHE = 'voxel-drive-v5';
 const PRECACHE = [
   './index.html',
+  './style.css',
+  './physics.js?v=2',
+  './cars.js?v=2',
+  './world.js?v=2',
+  './game.js?v=2',
+  './vendor/three.min.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png'

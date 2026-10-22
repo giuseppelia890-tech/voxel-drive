@@ -1,10 +1,11 @@
 {
   "name": "Voxel Drive: Infinite Horizon",
   "short_name": "Voxel Drive",
-  "description": "Open-world arcade voxel driving: città, autostrada, drift, off-road e parcheggi. Tre auto, cambio automatico o manuale. Desktop e Android.",
+  "id": "./",
+  "description": "Open-world voxel driving con 3 biomi: parcheggi millimetrici, drag 400 m con cambio manuale, drift, 120 auto distruttibili e consegne off-road con carico fisico. Tre auto, desktop e Android.",
   "lang": "it",
   "dir": "ltr",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "fullscreen",
   "display_override": ["fullscreen", "standalone"],
