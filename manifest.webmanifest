@@ -1,0 +1,29 @@
+{
+  "name": "Voxel Drive: Infinite Horizon",
+  "short_name": "Voxel Drive",
+  "description": "Open-world arcade voxel driving: città, autostrada, drift, off-road e parcheggi. Tre auto, cambio automatico o manuale. Desktop e Android.",
+  "lang": "it",
+  "dir": "ltr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#0a0f18",
+  "theme_color": "#0a0f18",
+  "categories": ["games", "racing"],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
