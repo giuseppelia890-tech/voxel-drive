@@ -8,16 +8,16 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="description" content="Voxel Drive: Infinite Horizon — open-world voxel driving. Città Neon, Autostrada Infinita, Montagna Off-road: parcheggi millimetrici, drag 400m, drift, 120 auto e consegne con carico fisico.">
+<meta name="description" content="Voxel Drive: Infinite Horizon v2.1 — open-world voxel driving senza confini: terreno e autostrada procedurali in streaming, lobby locale con paddock 3D, 4 auto inclusa Formula 1 con DRS/ERS, 5 sfide e 120 auto.">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Voxel Drive: Infinite Horizon">
-<meta property="og:description" content="Open-world voxel driving con 3 biomi, 3 auto, 5 sfide e 120 veicoli istanziati. Gioca nel browser o scarica l'APK Android.">
+<meta property="og:title" content="Voxel Drive: Infinite Horizon v2.1">
+<meta property="og:description" content="Mondo procedurale infinito, lobby + paddock 3D, Formula 1 con DRS/ERS e 5 sfide. Gioca nel browser o scarica l'APK Android.">
 <meta property="og:url" content="https://giuseppelia890-tech.github.io/voxel-drive/">
-<meta property="og:image" content="https://giuseppelia890-tech.github.io/voxel-drive/screenshot.png">
+<meta property="og:image" content="https://giuseppelia890-tech.github.io/voxel-drive/screenshot-f1.png">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Voxel Drive: Infinite Horizon">
-<meta name="twitter:description" content="Open-world voxel driving: parcheggi millimetrici, drag 400m, drift, 120 auto e consegne off-road.">
-<meta name="twitter:image" content="https://giuseppelia890-tech.github.io/voxel-drive/screenshot.png">
+<meta name="twitter:title" content="Voxel Drive: Infinite Horizon v2.1">
+<meta name="twitter:description" content="Mondo infinito, paddock 3D e Formula 1 con DRS/ERS: arcade voxel per browser e Android.">
+<meta name="twitter:image" content="https://giuseppelia890-tech.github.io/voxel-drive/screenshot-f1.png">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -30,6 +30,7 @@
     <div class="brand-block">
       <div class="brand">VOXEL DRIVE <span>∞</span></div>
       <div class="sub">Infinite Horizon</div>
+      <div class="pilot-tag" id="pilotTag">PILOTA 1</div>
     </div>
     <div class="top-right">
       <div class="pill" id="zonePill">AUTOSTRADA INFINITA</div>
@@ -43,6 +44,7 @@
       <div class="hint">
         <b>WASD / Frecce</b> guida · <b>Spazio</b> freno a mano / drift<br>
         <b>Q / E</b> marce · <b>M</b> auto/manuale · <b>C</b> camera<br>
+        <b>F1: F</b> DRS · <b>Shift</b> ERS · <b>L</b> lobby nel paddock<br>
         <b>R</b> reset · <b>P</b> pausa · <b>H</b> aiuto
       </div>
     </div>
@@ -79,6 +81,13 @@
     <div class="pm-row"><span id="parkAngle">0.0°</span><span id="parkOffset">0 cm</span></div>
     <div class="pm-bar"><i id="parkBar"></i></div>
     <div class="pm-hint" id="parkHint">FERMO DENTRO LE LINEE</div>
+  </div>
+
+  <div id="f1Panel" class="f1-panel glass hidden">
+    <span class="k">F1 · APEX RP-26</span>
+    <div class="f1-row"><span>DRS</span><b id="drsState">OFF</b></div>
+    <div class="f1-meter"><span>ERS</span><i class="f1-track"><b id="ersBar"></b></i></div>
+    <div class="f1-meter"><span>GOMME</span><i class="f1-track"><b id="tireBar"></b></i></div>
   </div>
 
   <div class="bottom">
@@ -127,15 +136,16 @@
     <div class="menu-head">
       <h1>VOXEL DRIVE <span>∞</span></h1>
       <p>Infinite Horizon</p>
-      <span class="tag">OPEN WORLD · 3 BIOMI · 5 SFIDE · ANDROID</span>
+      <span class="tag">MONDO INFINITO · 4 AUTO · LOBBY + PADDOCK · ANDROID</span>
     </div>
     <div class="car-grid" id="carGrid"></div>
     <div class="challenge-grid">
+      <button class="opt-btn challenge-btn" data-mode="lobby"><b>L</b>PADDOCK</button>
       <button class="opt-btn challenge-btn" data-mode="parking"><b>P</b>PARCHEGGIO</button>
       <button class="opt-btn challenge-btn" data-mode="drag"><b>400</b>DRAG</button>
       <button class="opt-btn challenge-btn" data-mode="drift"><b>D</b>DRIFT 60S</button>
       <button class="opt-btn challenge-btn" data-mode="delivery"><b>C</b>CONSEGNE</button>
-      <button class="opt-btn challenge-btn" data-mode="free"><b>120</b>TRAFFICO</button>
+      <button class="opt-btn challenge-btn" data-mode="free"><b>120</b>INFINITO</button>
     </div>
     <div class="record-line" id="recordLine">RECORD · --</div>
     <div class="menu-row">
@@ -143,17 +153,63 @@
       <button class="opt-btn" id="audioOptBtn">AUDIO: ON</button>
       <button class="opt-btn" id="installBtn" style="display:none">INSTALLA APP</button>
     </div>
-    <button class="start-btn" id="startBtn">GUIDA ORA · MONDO APERTO</button>
+    <button class="start-btn" id="startBtn">ENTRA NELLA LOBBY · PADDOCK</button>
     <div class="menu-row">
-      <a class="apk-btn" href="apk/VoxelDrive-v2.0.0.apk" download>SCARICA APK ANDROID · v2.0.0</a>
+      <a class="apk-btn" href="apk/VoxelDrive-v2.1.0.apk" download>SCARICA APK ANDROID · v2.1.0</a>
     </div>
     <div class="menu-hint desktop-hint">
       <b>WASD / Frecce</b> guida · <b>Spazio</b> drift · <b>Q/E</b> marce · <b>M</b> cambio<br>
-      <b>C</b> camera · <b>P</b> pausa · <b>R</b> reset · <b>H</b> aiuto
+      <b>F1:</b> <b>F</b> DRS · <b>Shift</b> ERS · <b>L</b> lobby · <b>C</b> camera · <b>P</b> pausa
     </div>
     <div class="menu-hint touch-hint">
       <b>Frecce</b> a sinistra · <b>pedali</b> a destra · <b>DRIFT</b> per derapare<br>
-      cambio manuale: tasti <b>+ / −</b> a destra
+      F1: <b>DRS</b> e <b>ERS</b> compaiono sopra lo sterzo
+    </div>
+  </div>
+</div>
+
+<!-- ====================== LOBBY / PADDOCK ===================== -->
+<div id="lobbyScreen" class="overlay hidden">
+  <div class="menu-card glass lobby-card">
+    <div class="lobby-head">
+      <span class="k">LOBBY LOCALE · PADDOCK 3D</span>
+      <h2>VOXEL RACING CLUB</h2>
+      <p>Prepara il pilota, scegli auto e modalità. READY: entri nel paddock fisico con garage e meccanici.</p>
+    </div>
+    <div class="lobby-grid">
+      <div class="lobby-left">
+        <label class="pilot-field">
+          <span>NOME PILOTA</span>
+          <input id="pilotName" type="text" maxlength="16" value="PILOTA 1" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="lobby-car-card">
+          <span class="k">AUTO SELEZIONATA</span>
+          <b id="lobbyCarLabel">SUPERCAR</b>
+          <span id="lobbyCarTag">Velocità pura</span>
+        </div>
+      </div>
+      <div class="lobby-right">
+        <span class="k">LOBBY · 1 PILOTA + CREW</span>
+        <div class="lobby-slots">
+          <div class="lobby-slot you"><b id="lobbyPilot">PILOTA 1</b><span>TU · READY</span></div>
+          <div class="lobby-slot"><b>MECCANICO</b><span>AI CREW</span></div>
+          <div class="lobby-slot"><b>APEX RP-26</b><span>F1 IN GARAGE</span></div>
+          <div class="lobby-slot"><b>PIT LANE</b><span>GOMME + ERS</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="lobby-mode-grid" id="lobbyModes">
+      <button class="lobby-mode selected" data-lobby-mode="lobby"><b>PADDOCK</b><span>garage · F1 · pit</span></button>
+      <button class="lobby-mode" data-lobby-mode="free"><b>FREE ROAM</b><span>mondo infinito</span></button>
+      <button class="lobby-mode" data-lobby-mode="drag"><b>DRAG 400</b><span>launch control</span></button>
+      <button class="lobby-mode" data-lobby-mode="drift"><b>DRIFT 60S</b><span>montagna</span></button>
+      <button class="lobby-mode" data-lobby-mode="parking"><b>PARCHEGGIO</b><span>precisione</span></button>
+      <button class="lobby-mode" data-lobby-mode="delivery"><b>CONSEGNE</b><span>pick-up</span></button>
+    </div>
+    <button class="start-btn" id="readyBtn">READY · ENTRA NEL PADDOCK</button>
+    <div class="menu-row">
+      <button class="opt-btn" id="lobbyBackBtn">← CAMBIA AUTO</button>
+      <span class="lobby-note">LOBBY LOCALE · NESSUN SERVER</span>
     </div>
   </div>
 </div>
@@ -170,6 +226,7 @@
     </div>
     <div class="menu-row">
       <button class="opt-btn" id="restartBtn">RIAVVIA SFIDA</button>
+      <button class="opt-btn" id="pauseLobbyBtn">LOBBY / PADDOCK</button>
       <button class="opt-btn" id="menuBtn">CAMBIA VEICOLO</button>
     </div>
     <div class="menu-hint"><b>P / Esc</b> per riprendere · <b>R</b> reset</div>
@@ -188,11 +245,16 @@
     <div><b>R</b><span>Reset sfida</span></div>
     <div><b>P</b><span>Pausa</span></div>
     <div><b>H</b><span>Questo pannello</span></div>
+    <div><b>F1: F</b><span>DRS (oltre 65 km/h)</span></div>
+    <div><b>F1: Shift</b><span>ERS / boost elettrico</span></div>
+    <div><b>L</b><span>Lobby nel paddock</span></div>
   </div>
+  <p><b>MONDO INFINITO:</b> terreno e autostrada sono generati in streaming attorno all'auto, senza confini.</p>
+  <p><b>PADDOCK:</b> garage, meccanici e pit lane a est della drag strip; fermati al PIT per gomme nuove ed ERS pieno.</p>
+  <p><b>FORMULA 1:</b> open-wheel con DRS, ERS, downforce, launch control e usura gomme. Shift per il boost, F per il DRS.</p>
   <p><b>PARCHEGGIO:</b> tutte le ruote dentro le linee, fermo, ≤ 1,5° e ≤ 18 cm per il PERFECT.</p>
   <p><b>DRAG:</b> allo staging tieni freno + gas; rilascia al verde nella finestra RPM per non pattinare.</p>
   <p><b>DRIFT:</b> Spazio o sterzata violenta in montagna; accumula punti per 60 secondi.</p>
-  <p><b>TRAFFICO:</b> 120 auto; urta ad alta velocità per carambole e deformazioni.</p>
   <p><b>CONSEGNE:</b> prendi il Pick-up, carica al depot e raggiungi 3 checkpoint senza perdere i cubi.</p>
 </div>
 
@@ -211,15 +273,19 @@
     <button class="tbtn brake" data-act="brake" aria-label="Freno">▼</button>
     <button class="tbtn gas" data-act="throttle" aria-label="Acceleratore">▲</button>
   </div>
+  <div class="f1-pad" id="f1Pad">
+    <button class="tbtn f1btn" data-act="drs" aria-label="DRS">DRS</button>
+    <button class="tbtn f1btn" data-act="ers" aria-label="ERS">ERS</button>
+  </div>
 </div>
 
 <div id="rotateHint"><div><span>⟳</span>RUOTA IL DISPOSITIVO<br>IN ORIZZONTALE</div></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>window.THREE || document.write('<script src="vendor/three.min.js"><\/script>');</script>
-<script src="physics.js?v=2"></script>
-<script src="cars.js?v=2"></script>
-<script src="world.js?v=2"></script>
-<script src="game.js?v=2"></script>
+<script src="physics.js?v=3"></script>
+<script src="cars.js?v=3"></script>
+<script src="world.js?v=3"></script>
+<script src="game.js?v=3"></script>
 </body>
 </html>

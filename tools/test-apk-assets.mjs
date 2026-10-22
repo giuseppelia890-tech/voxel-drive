@@ -25,6 +25,8 @@ const boot = await page.evaluate(() => ({
 console.log('APK BOOT', JSON.stringify(boot));
 await page.evaluate(() => addEventListener('blur', (e) => e.stopImmediatePropagation(), true));
 await page.click('#startBtn');
+await page.waitForTimeout(350);
+await page.click('#readyBtn');
 await page.waitForTimeout(700);
 await page.bringToFront();
 await page.keyboard.down('KeyW');

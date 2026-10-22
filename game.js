@@ -76,6 +76,8 @@
   let currentMode = 'free';
   let parkedCount = 0;
   let driftTotal = 0;
+  let lobbyMode = 'lobby';
+  let pilotName = 'PILOTA 1';
 
   const RECOMMENDED = {
     free: 'supercar', parking: 'citycar', drag: 'supercar',
@@ -149,6 +151,7 @@
     playerCar = VD.buildCar(def.color, { def });
     playerCar.rotation.order = 'YXZ';
     scene.add(playerCar);
+    document.body.classList.toggle('f1', type === 'f1');
     physics.applySpec(def.physics);
     physics.gear = 1;
     physics.rpm = physics.idleRpm;
@@ -187,6 +190,17 @@
       w.mesh.rotation.x += spin;
       if (w.front) w.mesh.rotation.y = physics.steerAngle * 0.85;
     }
+    const rims = playerCar.userData.rims;
+    if (rims) for (let i = 0; i < rims.length; i++) rims[i].rotation.x += spin;
+
+    const flap = playerCar.userData.drsFlap;
+    if (flap) {
+      const target = physics.drsActive ? -0.5 : 0.04;
+      flap.rotation.x += (target - flap.rotation.x) * Math.min(1, dt * 9);
+    }
+    const glow = playerCar.userData.ersGlow;
+    if (glow) glow.material.emissiveIntensity = physics.ersActive ? 3.0 : 1.0;
+
     if (cargo && cargo.loaded) {
       for (const cube of cargo.cubes) {
         if (cube.seated) cube.node.position.set(cargo.bed.x + cube.slotX, cargo.bed.y, cargo.bed.z);
@@ -320,7 +334,7 @@
   /* ---------------------------- input -------------------------- */
   const keys = Object.create(null);
   const blocked = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'];
-  const touchInput = { left: false, right: false, throttle: false, brake: false, handbrake: false };
+  const touchInput = { left: false, right: false, throttle: false, brake: false, handbrake: false, ers: false };
 
   addEventListener('keydown', (e) => {
     if (blocked.indexOf(e.code) !== -1) e.preventDefault();
@@ -328,16 +342,31 @@
     if (e.repeat) return;
 
     if (e.code === 'Enter' && state === 'menu') {
-      startGame('free');
+      if (lobbyScreen && !lobbyScreen.classList.contains('hidden')) readyLobby();
+      else openLobby('lobby');
       return;
     }
     if (e.code === 'Escape' || e.code === 'KeyP') {
-      if (state === 'playing') pauseGame();
+      if (state === 'menu' && lobbyScreen && !lobbyScreen.classList.contains('hidden')) {
+        showMenu();
+      } else if (state === 'playing') pauseGame();
       else if (state === 'paused') resumeGame();
       return;
     }
     if (state !== 'playing') return;
 
+    if (e.code === 'KeyL' && world.inPaddock(physics.position.x, physics.position.z)) {
+      openLobby('lobby');
+      return;
+    }
+    if (e.code === 'KeyF') {
+      if (physics.hasDrs) {
+        const open = physics.toggleDrs();
+        toast(open ? 'DRS APERTO · CARICO RIDOTTO' : 'DRS CHIUSO', open ? 'good' : 'warn');
+        Sound.chime(open ? 980 : 540, 0.07);
+      }
+      return;
+    }
     if (e.code === 'KeyC') cycleCamera();
     if (e.code === 'KeyM') toggleMode();
     if (e.code === 'KeyR') respawn();
@@ -386,6 +415,12 @@
           if (physics.autoMode) toggleMode();
           if (physics.shiftDown()) Sound.chime(620, 0.05);
           toastShift();
+        } else if (act === 'drs') {
+          if (physics.hasDrs) {
+            const open = physics.toggleDrs();
+            toast(open ? 'DRS APERTO' : 'DRS CHIUSO', open ? 'good' : 'warn');
+            Sound.chime(open ? 980 : 540, 0.07);
+          }
         } else {
           touchInput[act] = true;
         }
@@ -393,7 +428,7 @@
       const release = (e) => {
         e.preventDefault();
         btn.classList.remove('active');
-        if (act !== 'gearUp' && act !== 'gearDown') touchInput[act] = false;
+        if (act !== 'gearUp' && act !== 'gearDown' && act !== 'drs') touchInput[act] = false;
       };
       btn.addEventListener('pointerdown', press);
       btn.addEventListener('pointerup', release);
@@ -411,7 +446,8 @@
       steer: (left ? 1 : 0) - (right ? 1 : 0),
       throttle: (keys['KeyW'] || keys['ArrowUp'] || touchInput.throttle) ? 1 : 0,
       brake: (keys['KeyS'] || keys['ArrowDown'] || touchInput.brake) ? 1 : 0,
-      handbrake: !!(keys['Space'] || touchInput.handbrake)
+      handbrake: !!(keys['Space'] || touchInput.handbrake),
+      ers: !!(keys['ShiftLeft'] || keys['ShiftRight'] || touchInput.ers)
     };
   }
 
@@ -466,6 +502,20 @@
   const pauseSoundBtn = el('pauseSoundBtn');
   const pauseCamBtn = el('pauseCamBtn');
   const helpBtn = el('helpBtn');
+  const f1Panel = el('f1Panel');
+  const drsStateEl = el('drsState');
+  const ersBarEl = el('ersBar');
+  const tireBarEl = el('tireBar');
+  const lobbyScreen = el('lobbyScreen');
+  const pilotNameInput = el('pilotName');
+  const pilotTag = el('pilotTag');
+  const lobbyCarLabel = el('lobbyCarLabel');
+  const lobbyCarTag = el('lobbyCarTag');
+  const lobbyPilot = el('lobbyPilot');
+  const lobbyModes = el('lobbyModes');
+  const readyBtn = el('readyBtn');
+  const lobbyBackBtn = el('lobbyBackBtn');
+  const pauseLobbyBtn = el('pauseLobbyBtn');
 
   /* --------------------------- stato sfide --------------------- */
   const parking = {
@@ -513,7 +563,7 @@
       physics.position.y + up,
       physics.position.z - Math.cos(yaw) * back
     );
-    const k = 1 - Math.exp(-6 * dt);
+    const k = 1 - Math.exp(-(8 + physics.speed * 0.28) * dt);
     camera.position.lerp(idealPos, k);
 
     const ground = world.heightAt(camera.position.x, camera.position.z);
@@ -584,9 +634,9 @@
         '<span class="car-visual" style="--c:' + def.accent + '"></span>' +
         '<span class="car-title">' + def.label + '</span>' +
         '<span class="car-tag">' + def.tagline + '</span>' +
-        '<span class="statline"><em>VEL</em><i class="bar"><b style="width:' + (def.stats.speed * 100) + '%"></b></i></span>' +
-        '<span class="statline"><em>GRIP</em><i class="bar"><b style="width:' + (def.stats.grip * 100) + '%"></b></i></span>' +
-        '<span class="statline"><em>OFF</em><i class="bar"><b style="width:' + (def.stats.offroad * 100) + '%"></b></i></span>';
+        '<span class="statline"><em>VEL</em><i class="bar"><b style="width:' + Math.min(100, def.stats.speed * 100) + '%"></b></i></span>' +
+        '<span class="statline"><em>GRIP</em><i class="bar"><b style="width:' + Math.min(100, def.stats.grip * 100) + '%"></b></i></span>' +
+        '<span class="statline"><em>OFF</em><i class="bar"><b style="width:' + Math.min(100, def.stats.offroad * 100) + '%"></b></i></span>';
       btn.addEventListener('click', () => {
         selectedCar = key;
         document.querySelectorAll('.car-card').forEach((c) => {
@@ -747,11 +797,12 @@
   function startGame(mode) {
     mode = mode || 'free';
     startScreen.classList.add('hidden');
+    lobbyScreen.classList.add('hidden');
     pauseScreen.classList.add('hidden');
     document.body.classList.add('playing');
     state = 'playing';
 
-    if (mode !== 'free' && RECOMMENDED[mode]) {
+    if (mode !== 'free' && RECOMMENDED[mode] && (selectedCar !== 'f1' || mode === 'delivery')) {
       selectedCar = RECOMMENDED[mode];
       buildCarCards();
     }
@@ -769,7 +820,8 @@
     }
 
     const intro = {
-      free: 'ESPOLAZIONE LIBERA · 3 BIOMI',
+      lobby: 'PADDOCK · GARAGE, MECCANICI E F1 · GUIDA FUORI O PREMI L',
+      free: 'ESPOLAZIONE LIBERA · MONDO SENZA CONFINI',
       parking: 'PARCHEGGIO ESTREMO · ALLINEATI AL MILLIMETRO',
       drag: 'DRAG 400M · CAMBIO MANUALE CON Q/E',
       drift: 'SFIDA DRIFT · 60 SECONDI IN MONTAGNA',
@@ -780,6 +832,7 @@
     setTimeout(() => {
       if (mode === 'drag' && state === 'playing') toast('TIENI FRENO + GAS AL VIA · RILASCIA AL VERDE', 'warn');
       if (mode === 'delivery' && state === 'playing') toast('RAGGIUNGI IL DEPOT E CARICA I CUBI', 'warn');
+      if (mode === 'lobby' && state === 'playing') toast('ARRIVA AL PIT PER GOMME NUOVE · L PER LA LOBBY', 'warn');
     }, 2600);
   }
 
@@ -815,6 +868,7 @@
   function restartRun() {
     pauseScreen.classList.add('hidden');
     startScreen.classList.add('hidden');
+    lobbyScreen.classList.add('hidden');
     document.body.classList.add('playing');
     state = 'playing';
     makePlayerCar(selectedCar, true);
@@ -829,8 +883,11 @@
 
   function showMenu() {
     pauseScreen.classList.add('hidden');
+    lobbyScreen.classList.add('hidden');
     startScreen.classList.remove('hidden');
     document.body.classList.remove('playing');
+    document.body.classList.remove('f1');
+    if (f1Panel) f1Panel.classList.add('hidden');
     state = 'menu';
     Sound.setPaused(true);
     currentMode = 'free';
@@ -843,6 +900,67 @@
     updateRecordLine();
     resetChallengeState('free');
     resetTouchInput();
+  }
+
+  /* --------------------------- lobby ---------------------------- */
+  const LOBBY_LABELS = {
+    lobby: 'ENTRA NEL PADDOCK',
+    free: 'FREE ROAM · MONDO INFINITO',
+    drag: 'START DRAG 400',
+    drift: 'START DRIFT 60S',
+    parking: 'START PARCHEGGIO',
+    delivery: 'START CONSEGNE'
+  };
+
+  function loadPilotName() {
+    try {
+      const v = localStorage.getItem('vd_pilot');
+      if (v) pilotName = v.slice(0, 16);
+    } catch (err) {}
+    if (pilotNameInput) pilotNameInput.value = pilotName;
+    if (pilotTag) pilotTag.textContent = pilotName;
+    if (lobbyPilot) lobbyPilot.textContent = pilotName;
+  }
+
+  function savePilotName() {
+    pilotName = (pilotNameInput && pilotNameInput.value.trim().slice(0, 16)) || 'PILOTA 1';
+    try { localStorage.setItem('vd_pilot', pilotName); } catch (err) {}
+    if (pilotTag) pilotTag.textContent = pilotName;
+    if (lobbyPilot) lobbyPilot.textContent = pilotName;
+  }
+
+  function updateLobbyUI() {
+    const def = VD.CAR_DEFS[selectedCar] || VD.CAR_DEFS.supercar;
+    if (lobbyCarLabel) lobbyCarLabel.textContent = def.label;
+    if (lobbyCarTag) lobbyCarTag.textContent = def.tagline;
+    if (readyBtn) readyBtn.textContent = 'READY · ' + (LOBBY_LABELS[lobbyMode] || LOBBY_LABELS.lobby);
+    if (lobbyPilot) lobbyPilot.textContent = (pilotNameInput && pilotNameInput.value.trim()) || 'PILOTA 1';
+    if (lobbyModes) {
+      lobbyModes.querySelectorAll('.lobby-mode').forEach((b) => {
+        b.classList.toggle('selected', b.dataset.lobbyMode === lobbyMode);
+      });
+    }
+  }
+
+  function openLobby(mode) {
+    lobbyMode = mode || 'lobby';
+    startScreen.classList.add('hidden');
+    pauseScreen.classList.add('hidden');
+    lobbyScreen.classList.remove('hidden');
+    document.body.classList.remove('playing');
+    document.body.classList.remove('f1');
+    if (f1Panel) f1Panel.classList.add('hidden');
+    state = 'menu';
+    Sound.setPaused(true);
+    loadPilotName();
+    updateLobbyUI();
+    resetTouchInput();
+  }
+
+  function readyLobby() {
+    savePilotName();
+    Sound.resume();
+    startGame(lobbyMode);
   }
 
   /* --------------------------- 0-100 --------------------------- */
@@ -1379,6 +1497,7 @@
     updateChallengeHUD();
     updateCargoHUD();
     updateLaunchHUD();
+    updateF1HUD();
 
     if (physics.drifting && drift.livePoints > 800 && performance.now() - lastDriftToast > 4000) {
       lastDriftToast = performance.now();
@@ -1437,6 +1556,14 @@
       timer = fmtClock(drift.timeLeft);
       sub = 'MOLT x' + drift.multiplier.toFixed(1) + ' · ' + (physics.drifting ? 'DERAPATA' : 'CERCA L\'ANGOLO');
       progress = 1 - drift.timeLeft / world.drift.duration;
+    } else if (playerType === 'f1' && world.inPaddock(physics.position.x, physics.position.z)) {
+      show = true;
+      kind = 'PADDOCK F1 · PIT LANE';
+      title = world.inPit(physics.position.x, physics.position.z) ? 'AI BOX' : 'GARAGE';
+      timer = 'F1';
+      sub = 'GOMME ' + Math.round((1 - physics.tireWear) * 100) + '% · ERS ' +
+        Math.round(physics.ers * 100) + '% · FERMATI AL PIT';
+      progress = 1 - physics.tireWear;
     } else if (delivery.active || (Math.hypot(physics.position.x - world.delivery.depot.x, physics.position.z - world.delivery.depot.z) < 50 && playerType === 'pickup')) {
       show = true;
       kind = 'CONSEGNA OFF-ROAD';
@@ -1473,6 +1600,32 @@
     if (deliveryTimeEl) deliveryTimeEl.textContent = delivery.active ? fmtClock(delivery.time) : delivery.failed ? 'FALLITA' : 'PRONTO';
   }
 
+  function updateF1HUD() {
+    if (!f1Panel) return;
+    const show = state === 'playing' && playerType === 'f1';
+    f1Panel.classList.toggle('hidden', !show);
+    if (!show) return;
+
+    if (drsStateEl) {
+      let text = 'CHIUSO';
+      if (!physics.hasDrs) text = 'N/D';
+      else if (physics.drsActive) text = 'APERTO';
+      else if (physics.drs) text = 'ARMATO';
+      else if (physics.speed < 18) text = 'SBLOCCO 65';
+      drsStateEl.textContent = text;
+      drsStateEl.style.color = physics.drsActive ? '#57e39b' : physics.drs ? '#ffc857' : '#9fb1c9';
+    }
+    if (ersBarEl) {
+      ersBarEl.style.width = (physics.ers * 100).toFixed(1) + '%';
+      ersBarEl.style.background = physics.ersActive ? '#ffd166' : '#5ee7ff';
+    }
+    if (tireBarEl) {
+      const life = (1 - physics.tireWear) * 100;
+      tireBarEl.style.width = life.toFixed(1) + '%';
+      tireBarEl.style.background = life < 25 ? '#ff4757' : life < 55 ? '#ffc857' : '#57e39b';
+    }
+  }
+
   function updateLaunchHUD() {
     if (!launchPanel) return;
     const p = physics.position;
@@ -1500,7 +1653,20 @@
     /* il semaforo trattiene l'auto: si può solo far salire di giri */
     if (drag.state === 'countdown') input.brake = 1;
     physics.update(dt, input);
+    world.update(physics.position.x, physics.position.z);
     checkWallImpact();
+
+    /* pit service: meccanici del paddock cambiano gomme e ricaricano ERS */
+    if (playerType === 'f1' && world.inPit(physics.position.x, physics.position.z) && physics.speed < 1.6) {
+      if (physics.tireWear > 0.012 || physics.ers < 0.985) {
+        physics.tireWear = 0;
+        physics.ers = 1;
+        physics.drs = false;
+        physics.drsActive = false;
+        toast('MECCANICI · GOMME NUOVE + ERS PIENO', 'good');
+        Sound.chime(980, 0.14);
+      }
+    }
 
     const hit = traffic.collidePlayer(physics);
     if (hit) onTrafficHit(hit);
@@ -1546,6 +1712,7 @@
       }
     } else if (state === 'menu') {
       updateMenuCamera(raw);
+      world.update(physics.position.x, physics.position.z);
       traffic.update(raw * 0.6, physics.position, false, false);
       updateSun();
       Sound.setPaused(true);
@@ -1555,7 +1722,31 @@
   }
 
   /* ------------------------ event binding ---------------------- */
-  startBtn.addEventListener('click', () => startGame('free'));
+  startBtn.addEventListener('click', () => {
+    Sound.resume();
+    openLobby('lobby');
+  });
+  readyBtn.addEventListener('click', readyLobby);
+  lobbyBackBtn.addEventListener('click', showMenu);
+  pauseLobbyBtn.addEventListener('click', () => {
+    Sound.resume();
+    openLobby('lobby');
+  });
+  if (lobbyModes) {
+    lobbyModes.addEventListener('click', (e) => {
+      const btn = e.target.closest('.lobby-mode');
+      if (!btn) return;
+      lobbyMode = btn.dataset.lobbyMode || 'lobby';
+      updateLobbyUI();
+      Sound.chime(660, 0.05);
+    });
+  }
+  if (pilotNameInput) {
+    pilotNameInput.addEventListener('input', () => {
+      pilotName = pilotNameInput.value.slice(0, 16);
+      if (lobbyPilot) lobbyPilot.textContent = pilotName.trim() || 'PILOTA 1';
+    });
+  }
   resumeBtn.addEventListener('click', resumeGame);
   restartBtn.addEventListener('click', restartRun);
   menuBtn.addEventListener('click', showMenu);
@@ -1588,7 +1779,7 @@
   document.querySelectorAll('.challenge-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       Sound.resume();
-      startGame(btn.dataset.mode);
+      openLobby(btn.dataset.mode || 'lobby');
     });
   });
 
@@ -1632,6 +1823,7 @@
     get parking() { return parking; },
     get records() { return records; },
     world, traffic, startGame, spawnFor, resetChallengeState,
+    openLobby, readyLobby,
     beginDelivery, ejectCargo, completeDelivery,
     get renderer() { return renderer; },
     get scene() { return scene; },
@@ -1643,6 +1835,7 @@
     if (apkLink) apkLink.style.display = 'none';
   }
 
+  loadPilotName();
   makePlayerCar(selectedCar, true);
   buildCarCards();
   applyModeUI();

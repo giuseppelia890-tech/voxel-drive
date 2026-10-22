@@ -1,8 +1,9 @@
 /* ================================================================
    VOXEL DRIVE: INFINITE HORIZON — cars.js
-   Modelli voxel delle 3 auto guidabili + traffico ambientale
-   (120 auto simultanee) con THREE.InstancedMesh, deformazione
-   dei blocchi, carambole a catena e detriti.
+   Modelli voxel delle 4 auto guidabili (inclusa Formula 1)
+   + traffico ambientale (120 auto simultanee) con
+   THREE.InstancedMesh, deformazione dei blocchi, carambole
+   a catena e detriti.
    ================================================================ */
 (function () {
   'use strict';
@@ -57,6 +58,23 @@
         idleRpm: 800, launchWindow: [0.42, 0.62], autoShiftUp: 0.88, autoShiftDown: 0.34,
         brakeForce: 21
       }
+    },
+    f1: {
+      label: 'FORMULA 1', tagline: 'Apex RP-26 · oltre 360 km/h', color: 0xff2b3d, accent: '#ffd166',
+      body: { w: 0.98, h: 0.42, l: 3.8 },
+      cabin: { w: 0.6, h: 0.34, l: 0.72, z: -0.15 },
+      wheel: { r: 0.38, thickness: 0.42, x: 1.02, z: 1.42 },
+      openWheel: true,
+      stats: { speed: 1.45, grip: 1.35, offroad: 0.12 },
+      physics: {
+        mass: 798, gearAccel: [0, 26.0, 22.0, 18.5, 15.5, 13.5, 11.5],
+        grip: 13.5, offroadGrip: 2.8, wheelRadius: 0.38, wheelBase: 3.1, trackWidth: 2.04,
+        gearRatios: [3.6, 2.72, 2.16, 1.8, 1.55, 1.36], reverseRatio: 3.9,
+        finalDrive: 3.55, maxSpeed: 92, steerLock: 0.48, redline: 12500,
+        idleRpm: 3800, launchWindow: [0.52, 0.72], autoShiftUp: 0.94, autoShiftDown: 0.34,
+        brakeForce: 32, drs: true, ers: true, ersBoost: 5.8, downforce: 9.5,
+        dragCoeff: 0.00026, tireWear: true, tireWearRate: 1
+      }
     }
   };
 
@@ -73,6 +91,103 @@
     const glassMat = new THREE.MeshStandardMaterial({ color: 0x2b4058, roughness: 0.32, metalness: 0.45, flatShading: true });
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x1b2430, roughness: 0.7, metalness: 0.2, flatShading: true });
     const wheelMat = new THREE.MeshStandardMaterial({ color: 0x14161c, roughness: 0.9, metalness: 0.05, flatShading: true });
+
+    /* ---------- Formula 1: open-wheel, ali, halo, DRS ---------- */
+    if (def.openWheel) {
+      const accentMat = new THREE.MeshStandardMaterial({ color: 0xffd166, roughness: 0.35, metalness: 0.35, flatShading: true });
+      const carbonMat = new THREE.MeshStandardMaterial({ color: 0x151a24, roughness: 0.62, metalness: 0.28, flatShading: true });
+      const ersMat = new THREE.MeshStandardMaterial({
+        color: 0x54f2ff, emissive: 0x25c9ff, emissiveIntensity: 1.4, roughness: 0.22, metalness: 0.4, flatShading: true
+      });
+      const add = (geo, mat, x, y, z) => {
+        const m = new THREE.Mesh(geo, mat);
+        m.position.set(x, y, z);
+        m.castShadow = !simple;
+        m.receiveShadow = true;
+        g.add(m);
+        return m;
+      };
+
+      /* scocca centrale e naso */
+      add(new THREE.BoxGeometry(b.w, b.h, b.l * 0.8), bodyMat, 0, 0.55, -0.12);
+      add(new THREE.BoxGeometry(0.56, 0.2, 1.55), bodyMat, 0, 0.52, 1.45);
+      add(new THREE.BoxGeometry(0.8, 0.12, 0.55), accentMat, 0, 0.66, 1.12);
+      add(new THREE.BoxGeometry(1.62, 0.07, 3.1), carbonMat, 0, 0.3, -0.1);
+
+      /* pance laterali, airbox e cover motore */
+      for (const sx of [-1, 1]) {
+        add(new THREE.BoxGeometry(0.36, 0.36, 1.38), bodyMat, sx * 0.58, 0.56, -0.36);
+        add(new THREE.BoxGeometry(0.38, 0.06, 1.0), accentMat, sx * 0.58, 0.76, -0.42);
+      }
+      add(new THREE.BoxGeometry(0.6, 0.34, 1.18), bodyMat, 0, 0.72, -0.9);
+      add(new THREE.BoxGeometry(0.3, 0.26, 0.55), carbonMat, 0, 0.95, -0.65);
+      const ersGlow = add(new THREE.BoxGeometry(0.32, 0.035, 0.78), ersMat, 0, 0.91, -0.92);
+
+      /* cockpit + halo + casco */
+      add(new THREE.BoxGeometry(0.6, 0.28, 0.72), glassMat, 0, 0.83, -0.1);
+      add(new THREE.BoxGeometry(0.07, 0.07, 0.82), carbonMat, 0, 1.07, -0.08);
+      for (const sx of [-1, 1]) {
+        add(new THREE.BoxGeometry(0.055, 0.25, 0.07), carbonMat, sx * 0.3, 0.98, 0.25);
+        add(new THREE.BoxGeometry(0.055, 0.28, 0.065), carbonMat, sx * 0.29, 0.95, -0.42);
+      }
+      add(new THREE.BoxGeometry(0.3, 0.21, 0.28), accentMat, 0, 1.02, -0.1);
+
+      /* ala anteriore */
+      add(new THREE.BoxGeometry(2.28, 0.065, 0.46), carbonMat, 0, 0.34, 2.02);
+      add(new THREE.BoxGeometry(0.55, 0.045, 0.32), bodyMat, 0, 0.41, 1.96);
+      for (const sx of [-1, 1]) {
+        add(new THREE.BoxGeometry(0.07, 0.33, 0.5), accentMat, sx * 1.12, 0.46, 2.02);
+      }
+
+      /* ala posteriore e flap DRS */
+      for (const sx of [-1, 1]) {
+        add(new THREE.BoxGeometry(0.07, 0.55, 0.1), carbonMat, sx * 0.46, 0.82, -1.64);
+      }
+      add(new THREE.BoxGeometry(1.42, 0.065, 0.34), carbonMat, 0, 1.08, -1.72);
+      const drsFlap = new THREE.Group();
+      drsFlap.position.set(0, 1.06, -1.77);
+      const flap = new THREE.Mesh(new THREE.BoxGeometry(1.28, 0.045, 0.26), accentMat);
+      flap.castShadow = !simple;
+      flap.position.z = -0.05;
+      drsFlap.add(flap);
+      g.add(drsFlap);
+      g.userData.drsFlap = drsFlap;
+      g.userData.ersGlow = ersGlow;
+
+      /* sospensioni */
+      for (const sx of [-1, 1]) {
+        for (const sz of [1.42, -1.42]) {
+          add(new THREE.BoxGeometry(0.78, 0.045, 0.05), carbonMat, sx * 0.63, 0.38, sz);
+          add(new THREE.BoxGeometry(0.6, 0.045, 0.05), carbonMat, sx * 0.63, 0.5, sz * 0.92);
+        }
+      }
+
+      /* ruote larghe open-wheel */
+      const f1WheelGeo = new THREE.CylinderGeometry(wh.r, wh.r, wh.thickness, 12);
+      f1WheelGeo.rotateZ(Math.PI / 2);
+      const rims = [];
+      const wheels = [];
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          const w = new THREE.Mesh(f1WheelGeo, wheelMat);
+          w.position.set(sx * wh.x, wh.r, sz * wh.z);
+          w.castShadow = !simple;
+          w.rotation.order = 'YXZ';
+          g.add(w);
+          const rim = new THREE.Mesh(new THREE.CylinderGeometry(wh.r * 0.48, wh.r * 0.48, wh.thickness + 0.012, 10), accentMat);
+          rim.rotation.z = Math.PI / 2;
+          rim.position.copy(w.position);
+          g.add(rim);
+          rims.push(rim);
+          wheels.push({ mesh: w, front: sz > 0, sx, sz });
+        }
+      }
+      g.userData.wheels = wheels;
+      g.userData.rims = rims;
+      g.userData.def = def;
+      g.scale.setScalar(opts.scale || 1);
+      return g;
+    }
 
     const bodyY = wh.r + b.h * 0.5 - 0.06;
     const body = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.h, b.l), bodyMat);
@@ -440,7 +555,8 @@
             car.vz *= Math.exp(-2.2 * dt);
             car.yawVel *= Math.exp(-2.6 * dt);
           }
-          if (car.wreckTimer > 9 || Math.abs(car.x) > 560 || Math.abs(car.z) > 560) {
+          const wreckDist = Math.hypot(car.x - px, car.z - pz);
+          if (car.wreckTimer > 9 || wreckDist > 520) {
             this.spawnCar(car, false, playerPos);
           }
           car.wheelSpin += dt * 2;
@@ -455,8 +571,8 @@
         const dx = car.x - px;
         const dz = car.z - pz;
         const dist2 = dx * dx + dz * dz;
+        /* l'autostrada è infinita: nessun limite a p per le auto in corsia */
         const out =
-          (car.mode === 'hw' && Math.abs(car.p) > 530) ||
           (car.mode === 'cz' && Math.abs(car.p) > 280) ||
           (car.mode === 'cx' && (car.p < 30 || car.p > 335));
 

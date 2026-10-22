@@ -56,8 +56,33 @@ check('menu iniziale', boot.state === 'menu', boot.state);
 check('draw calls contenuti', boot.calls > 0 && boot.calls < 130, boot.calls);
 await page.screenshot({ path: '/tmp/vd_qa_menu.png' });
 
-/* ----------------------------- guida libera -------------------------- */
+/* ----------------------------- lobby / paddock ----------------------- */
 await page.click('#startBtn');
+await page.waitForTimeout(400);
+const lobbyOpen = await page.evaluate(() => ({
+  state: window.VD.debug.state,
+  open: !document.getElementById('lobbyScreen').classList.contains('hidden'),
+  modes: document.querySelectorAll('.lobby-mode').length,
+  pilot: document.getElementById('pilotName').value
+}));
+check('lobby locale con nome pilota e modalità', lobbyOpen.state === 'menu' && lobbyOpen.open && lobbyOpen.modes === 6 && !!lobbyOpen.pilot, lobbyOpen);
+await page.click('.lobby-mode[data-lobby-mode="lobby"]');
+await page.click('#readyBtn');
+await page.waitForTimeout(900);
+const paddock = await page.evaluate(() => {
+  const d = window.VD.debug;
+  return {
+    state: d.state, mode: d.mode, x: +d.physics.position.x.toFixed(1), z: +d.physics.position.z.toFixed(1),
+    inPaddock: d.world.inPaddock(d.physics.position.x, d.physics.position.z),
+    showCars: d.world.paddock.cars.length, mechanics: d.world.paddock.mechanics.length,
+    zone: d.world.zoneName(d.physics.position.x, d.physics.position.z)
+  };
+});
+check('READY porta nel paddock 3D', paddock.state === 'playing' && paddock.mode === 'lobby' && paddock.inPaddock && paddock.showCars === 3 && paddock.mechanics === 5, paddock);
+await page.screenshot({ path: '/tmp/vd_qa_paddock.png' });
+
+/* ----------------------------- guida libera -------------------------- */
+await page.evaluate(() => window.VD.debug.startGame('free'));
 await page.waitForTimeout(600);
 await page.bringToFront();
 await page.keyboard.down('KeyW');
@@ -298,9 +323,11 @@ await page.waitForTimeout(300);
 await page.click('#menuBtn');
 await page.waitForTimeout(500);
 const menuBack = await page.evaluate(() => ({ state: window.VD.debug.state, cards: document.querySelectorAll('.car-card').length }));
-check('ritorno al menu', menuBack.state === 'menu' && menuBack.cards === 3, menuBack);
+check('ritorno al menu', menuBack.state === 'menu' && menuBack.cards === 4, menuBack);
 await page.click('[data-car="pickup"]');
 await page.click('#startBtn');
+await page.waitForTimeout(300);
+await page.click('#readyBtn');
 await page.waitForTimeout(800);
 const pickup = await page.evaluate(() => ({ player: window.VD.debug.playerType, cubes: window.VD.debug.cargo ? window.VD.debug.cargo.cubes.length : 0 }));
 check('selezione pick-up dal menu', pickup.player === 'pickup' && pickup.cubes === 3, pickup);
@@ -311,9 +338,67 @@ await page.click('#menuBtn');
 await page.waitForTimeout(350);
 await page.click('[data-car="citycar"]');
 await page.click('#startBtn');
+await page.waitForTimeout(300);
+await page.click('#readyBtn');
 await page.waitForTimeout(700);
 const city = await page.evaluate(() => ({ player: window.VD.debug.playerType, cargo: !!window.VD.debug.cargo }));
 check('selezione citycar dal menu', city.player === 'citycar' && !city.cargo, city);
+
+/* --------------------- mondo infinito / F1 -------------------------- */
+const infinite = await page.evaluate(() => {
+  const d = window.VD.debug;
+  d.physics.reset(0, 1200, 0);
+  d.world.update(0, 1200);
+  return {
+    z: +d.physics.position.z.toFixed(1),
+    chunks: d.world.activeChunks.size,
+    keys: [...d.world.activeChunks.keys()].slice(0, 2),
+    highwayY: +d.world.heightAt(0, 1200).toFixed(2),
+    zone: d.world.zoneName(0, 1200),
+    dashes: d.world.highwayDashes.count
+  };
+});
+check('mondo infinito oltre ±548 con streaming', infinite.z === 1200 && infinite.chunks === 25 && infinite.keys.length === 2 && infinite.dashes === 480 && infinite.zone === 'AUTOSTRADA INFINITA', infinite);
+
+await page.keyboard.press('KeyP');
+await page.waitForTimeout(250);
+await page.click('#menuBtn');
+await page.waitForTimeout(300);
+await page.click('[data-car="f1"]');
+await page.click('#startBtn');
+await page.waitForTimeout(300);
+await page.click('#readyBtn');
+await page.waitForTimeout(600);
+await page.evaluate(() => window.VD.debug.physics.reset(0, 900, 0));
+await page.bringToFront();
+await page.keyboard.down('KeyW');
+await page.keyboard.down('ShiftLeft');
+await page.waitForTimeout(1800);
+await page.keyboard.press('KeyF');
+await page.waitForTimeout(3200);
+const f1run = await page.evaluate(() => {
+  const d = window.VD.debug;
+  return {
+    player: d.playerType, kmh: Math.round(d.physics.speed * 3.6), gear: d.physics.gear,
+    drs: d.physics.drsActive, ers: +d.physics.ers.toFixed(2), tire: +d.physics.tireWear.toFixed(3),
+    downforce: +d.physics.downforce.toFixed(1), hud: document.getElementById('drsState').textContent,
+    panel: !document.getElementById('f1Panel').classList.contains('hidden')
+  };
+});
+await page.keyboard.up('ShiftLeft');
+await page.keyboard.up('KeyW');
+check('F1 DRS + ERS + downforce + usura', f1run.player === 'f1' && f1run.kmh > 250 && f1run.drs && f1run.ers < 1 && f1run.tire > 0 && f1run.downforce > 0 && f1run.hud === 'APERTO' && f1run.panel, f1run);
+await page.screenshot({ path: '/tmp/vd_qa_f1.png' });
+
+const pit = await page.evaluate(async () => {
+  const d = window.VD.debug;
+  d.physics.reset(d.world.paddock.pit.x, d.world.paddock.pit.z, 0);
+  d.physics.tireWear = 0.6;
+  d.physics.ers = 0.1;
+  await new Promise((r) => setTimeout(r, 500));
+  return { wear: +d.physics.tireWear.toFixed(3), ers: +d.physics.ers.toFixed(2), pit: d.world.inPit(d.physics.position.x, d.physics.position.z) };
+});
+check('pit service gomme ed ERS', pit.pit && pit.wear < 0.05 && pit.ers > 0.99, pit);
 
 /* ---------------------------- PWA / offline ------------------------- */
 await page.waitForTimeout(900);
@@ -329,7 +414,7 @@ try {
     return { supported: true, active: !!(reg && reg.active), script: reg && reg.active && reg.active.scriptURL, keys };
   });
 } catch (e) { pwa = { error: e.message }; }
-check('service worker v5 attivo', !!pwa.active && (pwa.keys || []).includes('voxel-drive-v5'), pwa);
+check('service worker v6 attivo', !!pwa.active && (pwa.keys || []).includes('voxel-drive-v6'), pwa);
 
 let offlineBoot = null;
 try {
@@ -367,6 +452,9 @@ await page.reload({ waitUntil: 'load' });
 await page.waitForFunction(() => window.VD && window.VD.debug, null, { timeout: 20000 });
 await page.waitForTimeout(2400);
 await page.click('#startBtn');
+await page.waitForTimeout(350);
+await page.click('.lobby-mode[data-lobby-mode="free"]');
+await page.click('#readyBtn');
 await page.waitForTimeout(600);
 await page.bringToFront();
 await page.keyboard.down('KeyW');

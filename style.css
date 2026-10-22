@@ -271,7 +271,7 @@
     font-size: 8px; font-weight: 900; letter-spacing: 2px;
   }
 
-  .car-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+  .car-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
   .car-card {
     display: flex; flex-direction: column; align-items: center; gap: 4px;
     padding: 11px 8px 9px; border-radius: 16px; cursor: pointer;
@@ -594,7 +594,7 @@
 
 /* ----------------------- menu sfide / record ------------------ */
 .challenge-grid {
-  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px;
 }
 .challenge-btn {
   min-width: 0; padding: 7px 5px 8px; border-radius: 12px;
@@ -648,7 +648,7 @@
   .cargo-dots i { width: 21px; height: 13px; }
   .park-meter { width: min(224px, 58vw); bottom: calc(12px + var(--safe-bottom)); }
   .launch-panel { width: min(250px, 56vw); bottom: calc(88px + var(--safe-bottom)); }
-  .challenge-grid { grid-template-columns: repeat(5, 1fr); gap: 5px; }
+  .challenge-grid { grid-template-columns: repeat(3, 1fr); gap: 5px; }
   .challenge-btn { font-size: 6px; padding: 6px 3px 7px; }
   .challenge-btn b { font-size: 13px; }
   .help-grid { grid-template-columns: 1fr; }
@@ -668,4 +668,125 @@ body.touch .launch-panel { bottom: calc(250px + var(--safe-bottom)); width: min(
   .launch-panel { bottom: calc(196px + var(--safe-bottom)); }
   .record-line { display: none; }
   .challenge-btn b { font-size: 11px; }
+}
+
+/* ================================================================
+   V2.1 — lobby, paddock, Formula 1, mondo infinito
+   ================================================================ */
+.pilot-tag {
+  margin-top: 5px; display: inline-block; padding: 2px 8px;
+  border-radius: 99px; border: 1px solid rgba(255, 210, 102, 0.35);
+  background: rgba(255, 210, 102, 0.07); color: var(--amber);
+  font-size: 8px; font-weight: 900; letter-spacing: 1.3px;
+}
+body.f1 .brand span { color: #ff4757; }
+
+/* ---------------------------- F1 HUD -------------------------- */
+.f1-panel {
+  position: fixed; z-index: 6; left: 50%; bottom: calc(22px + var(--safe-bottom));
+  transform: translateX(-50%);
+  width: 226px; padding: 9px 13px 10px;
+  pointer-events: none;
+}
+.f1-panel .k { color: var(--amber); font-size: 7px; margin-bottom: 3px; }
+.f1-row { display: flex; align-items: center; justify-content: space-between; font-size: 8px; font-weight: 900; letter-spacing: 1.4px; color: var(--muted); }
+.f1-row b { font-size: 10px; letter-spacing: 1.2px; }
+.f1-meter { display: flex; align-items: center; gap: 7px; margin-top: 5px; font-size: 7px; font-weight: 900; letter-spacing: 1px; color: var(--muted); }
+.f1-meter > span { width: 35px; }
+.f1-track { display: block; flex: 1; height: 5px; border-radius: 99px; background: rgba(255, 255, 255, 0.11); overflow: hidden; }
+.f1-track b { display: block; height: 100%; width: 100%; border-radius: 99px; background: var(--cyan); transition: width 0.12s linear, background 0.15s linear; }
+
+/* ---------------------------- lobby --------------------------- */
+.lobby-card { width: min(860px, 96vw); gap: 10px; }
+.lobby-head { text-align: center; }
+.lobby-head h2 { font-size: clamp(20px, 3.2vw, 31px); font-weight: 900; letter-spacing: 4px; color: var(--text); }
+.lobby-head p { margin-top: 5px; font-size: 9px; line-height: 1.6; color: var(--muted); letter-spacing: 0.7px; }
+.lobby-head .k { color: var(--green); margin-bottom: 4px; }
+.lobby-grid { display: grid; grid-template-columns: 1fr 1.15fr; gap: 10px; }
+.lobby-left, .lobby-right { display: flex; flex-direction: column; gap: 8px; }
+.pilot-field {
+  display: flex; flex-direction: column; gap: 5px; padding: 10px 12px;
+  border-radius: 13px; border: 1px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.045);
+}
+.pilot-field span { font-size: 7px; font-weight: 900; letter-spacing: 1.7px; color: var(--muted); }
+.pilot-field input {
+  width: 100%; border: none; outline: none; background: transparent;
+  color: var(--text); font: inherit; font-size: 18px; font-weight: 900;
+  letter-spacing: 1.4px; text-transform: uppercase;
+}
+.lobby-car-card {
+  display: flex; flex-direction: column; gap: 2px; padding: 9px 12px;
+  border-radius: 13px; border: 1px solid rgba(255, 210, 102, 0.34);
+  background: rgba(255, 210, 102, 0.06);
+}
+.lobby-car-card b { font-size: 18px; font-weight: 900; letter-spacing: 1.5px; color: var(--amber); }
+.lobby-car-card > span:last-child { font-size: 8px; color: var(--muted); letter-spacing: 0.6px; }
+.lobby-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.lobby-slot {
+  display: flex; flex-direction: column; gap: 2px; padding: 8px 9px;
+  border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.035);
+}
+.lobby-slot b { font-size: 9px; letter-spacing: 1px; color: var(--text); }
+.lobby-slot span { font-size: 7px; letter-spacing: 1px; color: var(--muted); }
+.lobby-slot.you { border-color: rgba(87, 227, 155, 0.55); background: rgba(87, 227, 155, 0.08); }
+.lobby-slot.you b { color: var(--green); }
+.lobby-mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.lobby-mode {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 8px 10px; border-radius: 11px; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.04); color: var(--text); font: inherit;
+  text-align: left; touch-action: manipulation;
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.12s ease;
+}
+.lobby-mode:hover { background: rgba(255, 255, 255, 0.08); }
+.lobby-mode.selected { border-color: var(--cyan); background: rgba(94, 231, 255, 0.12); box-shadow: 0 0 0 1px rgba(94, 231, 255, 0.35); }
+.lobby-mode b { font-size: 9px; font-weight: 900; letter-spacing: 1.2px; }
+.lobby-mode span { font-size: 7px; color: var(--muted); letter-spacing: 0.4px; }
+.lobby-note { flex: 1; align-self: center; text-align: right; font-size: 7px; letter-spacing: 1.4px; color: var(--muted); }
+
+/* --------------------------- F1 touch ------------------------- */
+.f1-pad {
+  position: absolute; display: none; gap: 8px;
+  left: calc(14px + var(--safe-left));
+  bottom: calc(104px + var(--safe-bottom));
+}
+body.touch.playing.f1 .f1-pad { display: flex; }
+.f1-pad .tbtn {
+  width: 54px; height: 44px; border-radius: 13px;
+  font-size: 10px; letter-spacing: 1px;
+  border-color: rgba(255, 210, 102, 0.45);
+  color: var(--amber);
+}
+.f1-pad .tbtn.active { background: rgba(255, 210, 102, 0.28); border-color: var(--amber); }
+
+body.touch .f1-panel {
+  bottom: calc(10px + var(--safe-bottom));
+  width: 190px; padding: 7px 10px 8px;
+}
+body.touch .f1-panel .k { display: none; }
+body.touch .f1-row { font-size: 7px; }
+body.touch .f1-meter { margin-top: 4px; }
+
+@media (max-width: 780px) {
+  .lobby-grid { grid-template-columns: 1fr; }
+  .lobby-slots { grid-template-columns: repeat(4, 1fr); }
+  .lobby-mode-grid { grid-template-columns: repeat(3, 1fr); }
+  .car-grid { grid-template-columns: repeat(2, 1fr); }
+  .f1-panel { width: 190px; bottom: calc(16px + var(--safe-bottom)); }
+  body.touch .f1-panel { width: 170px; }
+}
+@media (max-height: 520px) {
+  .lobby-head p { display: none; }
+  .lobby-grid { grid-template-columns: 1fr; gap: 6px; }
+  .lobby-left { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .lobby-right { display: none; }
+  .lobby-car-card b { font-size: 14px; }
+  .lobby-slots { display: none; }
+  .lobby-mode { padding: 6px 8px; }
+  .lobby-mode span { display: none; }
+  .lobby-note { display: none; }
+  .f1-panel { width: 190px; padding: 7px 10px 8px; }
 }

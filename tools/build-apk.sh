@@ -16,7 +16,7 @@ BUILD="$ROOT/.build-apk"
 KS_DIR="$ROOT/.android/keystore"
 KS="$KS_DIR/voxel-drive.jks"
 PROPS="$KS_DIR/keystore.properties"
-VERSION="2.0.0"
+VERSION="2.1.0"
 APK="$ROOT/apk/VoxelDrive-v$VERSION.apk"
 
 export JAVA_HOME
@@ -73,7 +73,7 @@ echo "==> aapt2 link (manifest + resources + assets)"
   --java "$BUILD/gen" \
   --min-sdk-version 24 \
   --target-sdk-version 35 \
-  --version-code 2 \
+  --version-code 3 \
   --version-name "$VERSION" \
   "$BUILD/compiled-res.zip"
 

@@ -69,6 +69,21 @@
       this.badShiftTimer = 0;
       this.overRev = false;
 
+      /* sistemi Formula 1 */
+      this.hasDrs = false;
+      this.hasErs = false;
+      this.drs = false;
+      this.drsActive = false;
+      this.ers = 0;
+      this.ersActive = false;
+      this.ersBoost = 0;
+      this.downforce = 0;
+      this.downforceCoeff = 0;
+      this.dragCoeff = 0.00075;
+      this.tireWear = 0;
+      this.tireWearEnabled = false;
+      this.tireWearRate = 1;
+
       this.throttle = 0;
       this.brake = 0;
       this.handbrake = 0;
@@ -136,6 +151,16 @@
       this.launchWindow = spec.launchWindow || [0.46, 0.68];
       this.brakeForce = spec.brakeForce || 18;
 
+      this.hasDrs = !!spec.drs;
+      this.hasErs = !!spec.ers;
+      this.ersBoost = spec.ersBoost || 0;
+      this.downforceCoeff = spec.downforce || 0;
+      this.dragCoeff = spec.dragCoeff || 0.00075;
+      this.tireWearEnabled = !!spec.tireWear;
+      this.tireWearRate = spec.tireWearRate || 1;
+      if (!this.hasDrs) this.drs = false;
+      if (!this.hasErs) this.ers = 0;
+
       if (this.gear > 6) this.gear = 6;
       if (this.rpm > this.maxRpm) this.rpm = this.idleRpm;
     }
@@ -147,6 +172,17 @@
         this.stopTimer = 0;
       }
       if (this.autoMode) this.shiftTimer = 0;
+    }
+
+    toggleDrs() {
+      if (!this.hasDrs) return false;
+      if (this.drs) {
+        this.drs = false;
+        return false;
+      }
+      if (this.speed < 18 || this.offroad || this.forwardSpeed < 0) return false;
+      this.drs = true;
+      return true;
     }
 
     shiftUp() {
@@ -241,6 +277,12 @@
       this.throttle = 0;
       this.brake = 0;
       this.handbrake = 0;
+      this.drs = false;
+      this.drsActive = false;
+      this.ers = this.hasErs ? 1 : 0;
+      this.ersActive = false;
+      this.tireWear = 0;
+      this.downforce = 0;
       this.speed = 0;
       this.forwardSpeed = 0;
       this.lateralSpeed = 0;
@@ -286,6 +328,12 @@
 
       const speed = Math.hypot(this.velocity.x, this.velocity.z);
       this.speed = speed;
+
+      /* DRS: si chiude da solo in frenata, fuori pista o a bassa velocità */
+      if (this.drs && (speed < 20 || this.offroad || this.brake > 0.12 || this.handbrake > 0.2 || this.forwardSpeed < 0)) {
+        this.drs = false;
+      }
+      this.drsActive = !!(this.hasDrs && this.drs);
 
       let fwdX = Math.sin(this.yaw);
       let fwdZ = Math.cos(this.yaw);
@@ -390,6 +438,17 @@
         brake = this.throttle;
       }
 
+      /* ERS: spinta elettrica a batteria, si ricarica in frenata */
+      const ersRequested = !!input.ers && this.hasErs && this.ers > 0.01 &&
+        this.gear > 0 && this.throttle > 0.04 && !this.staged;
+      this.ersActive = ersRequested;
+      if (ersRequested) {
+        this.ers = Math.max(0, this.ers - dt * 0.30);
+      } else if (this.hasErs) {
+        const recharge = (this.brake > 0.15 || this.handbrake > 0.2) ? 0.26 : 0.095;
+        this.ers = clamp(this.ers + recharge * dt, 0, 1);
+      }
+
       let engineAccel = 0;
       if (this.gear !== 0 && throttle > 0.01 && this.fuelCut <= 0 && this.shiftTimer <= 0 && !this.staged) {
         const base = this.gear === -1 ? 7.2 : this.gearAccel[this.gear];
@@ -397,11 +456,13 @@
         engineAccel = throttle * base * torque * (1 - this.wheelSpin * 0.62);
         if (this.bogTimer > 0) engineAccel *= 0.38;
         if (this.gear === -1) engineAccel = -engineAccel;
+        if (this.ersActive && this.gear !== -1) engineAccel += this.ersBoost * (0.62 + throttle * 0.38);
       }
 
-      const drag = 0.00075 * vf * Math.abs(vf);
+      const drag = this.dragCoeff * (this.drsActive ? 0.62 : 1) * vf * Math.abs(vf);
+      const inducedDrag = this.downforce * 0.000012 * vf * Math.abs(vf);
       const rolling = 0.022 * vf;
-      let accel = engineAccel - drag - rolling;
+      let accel = engineAccel - drag - inducedDrag - rolling;
 
       if (this.throttle < 0.04 && this.gear > 0 && Math.abs(vf) > 0.2) {
         accel -= Math.sign(vf) * (0.9 + Math.abs(vf) * 0.012);
@@ -416,7 +477,8 @@
       const oldVf = vf;
       vf += accel * dt;
       if (brake > 0.05 && oldVf !== 0 && Math.sign(vf) !== Math.sign(oldVf)) vf = 0;
-      vf = clamp(vf, -17, this.maxSpeed);
+      const speedCap = this.maxSpeed + (this.drsActive ? 8 : 0) + (this.ersActive ? 4 : 0);
+      vf = clamp(vf, -17, speedCap);
       this.forwardSpeed = vf;
       this.accel = accel;
 
@@ -425,6 +487,14 @@
       this.offroad = !!surf.offroad;
       let grip = this.offroad ? this.offroadGrip : this.grip;
       grip *= surf.grip === undefined ? 1 : surf.grip;
+
+      /* downforce: più velocità = più carico aerodinamico e grip */
+      const dfSpeed = clamp(speed / 42, 0, 1.45);
+      this.downforce = this.downforceCoeff * dfSpeed * dfSpeed *
+        (this.offroad ? 0.12 : 1) * (this.drsActive ? 0.82 : 1);
+      grip += this.downforce;
+      grip *= 1 - this.tireWear * 0.42;
+
       if (this.handbrake > 0.05) grip = lerp(grip, 1.15, this.handbrake);
       else if (speed > 17 && Math.abs(this.steer) > 0.55) grip *= 0.42;
       if (this.wheelSpin > 0.15) grip *= 0.78;
@@ -438,14 +508,19 @@
       /* ---------------- wheelspin ---------------- */
       this.wheelSpin = Math.max(0, this.wheelSpin - dt * (1.25 + speed * 0.055));
 
+      /* ---------------- usura gomme ---------------- */
+      if (this.tireWearEnabled) {
+        const load = clamp(Math.abs(vf) / Math.max(this.maxSpeed, 1), 0, 1);
+        const rate = (0.0025 + this.slipAngle * 0.0055 + this.wheelSpin * 0.009 + load * 0.0018) * this.tireWearRate;
+        this.tireWear = clamp(this.tireWear + rate * dt, 0, 1);
+      }
+
       /* ---------------- integrazione ---------------- */
       this.velocity.set(fwdX * vf + rX * vl, 0, fwdZ * vf + rZ * vl);
       const oldX = this.position.x;
       const oldZ = this.position.z;
       this.position.x += this.velocity.x * dt;
       this.position.z += this.velocity.z * dt;
-      this.position.x = clamp(this.position.x, -548, 548);
-      this.position.z = clamp(this.position.z, -548, 548);
       this.distance += Math.hypot(this.position.x - oldX, this.position.z - oldZ);
 
       /* ---------------- collisioni con gli ostacoli ---------------- */

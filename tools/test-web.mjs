@@ -30,6 +30,9 @@ console.log('BOOT', JSON.stringify(boot));
 await page.screenshot({ path: '/tmp/vd_menu.png' });
 
 await page.click('#startBtn');
+await page.waitForTimeout(350);
+await page.click('.lobby-mode[data-lobby-mode="free"]');
+await page.click('#readyBtn');
 await page.waitForTimeout(1000);
 await page.keyboard.down('KeyW');
 await page.waitForTimeout(5000);

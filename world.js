@@ -49,12 +49,20 @@
           { x: -312, z: 232, r: 17 }
         ]
       };
+      this.paddock = {
+        x: 95, z: -360, padW: 86, padD: 48,
+        garage: { x: 95, z: -386, w: 54, d: 14, h: 8 },
+        pit: { x: 95, z: -348, r: 7.5 },
+        triggerR: 48,
+        cars: [], mechanics: []
+      };
       this.spawns = {
         free: { x: 0, z: -24, yaw: 0 },
         parking: { x: 120, z: 57, yaw: 0 },
         drag: { x: 0, z: -332, yaw: 0 },
         drift: { x: -240, z: 100, yaw: -Math.PI / 2 },
-        delivery: { x: -330, z: -232, yaw: 0 }
+        delivery: { x: -330, z: -232, yaw: 0 },
+        lobby: { x: 24, z: -360, yaw: Math.PI / 2 }
       };
       this.city = { xmin: 40, xmax: 320, zmin: -260, zmax: 260 };
       this.cityRoadsX = [80, 160, 240];
@@ -74,6 +82,19 @@
       this.driftGateMeshes = [];
       this.checkpointMeshes = [];
       this.depotMesh = null;
+
+      /* streaming del mondo: 5x5 chunk da 300 m attorno al giocatore */
+      this.chunkSize = 300;
+      this.chunkRadius = 2;
+      this.chunkSegs = 32;
+      this.chunkGroup = null;
+      this.chunkPool = [];
+      this.activeChunks = new Map();
+      this._cx = null;
+      this._cz = null;
+      this._lastDashZ = null;
+      this._lastLampZ = null;
+      this._streamTime = 0;
     }
 
     rand() {
@@ -93,8 +114,8 @@
       h += Math.sin((x + z) * 0.085) * 1.1;
       h = Math.max(0, h + 4);
 
-      /* catena montuosa a ovest: onde sovrapposte, dossi e creste */
-      const mask = smoothstep(40, 220, -x) * (1 - smoothstep(470, 548, -x));
+      /* catena montuosa a ovest: onde sovrapposte, dossi e creste (infinita) */
+      const mask = smoothstep(40, 220, -x);
       if (mask > 0.001) {
         const ridge =
           15.5 +
@@ -128,6 +149,15 @@
       const df = 1 - smoothstep(dep.r * 0.8, dep.r * 1.55, dd);
       if (df > 0) h = lerp(h, dep.h, df);
 
+      /* paddock/lobby fisica e accesso dall'autostrada */
+      const pd = Math.hypot(x - this.paddock.x, z - this.paddock.z);
+      const pf = 1 - smoothstep(30, 58, pd);
+      if (pf > 0) h = lerp(h, 0.12, pf);
+      const accessZ = 1 - smoothstep(6, 19, Math.abs(z - this.paddock.z));
+      const accessX = smoothstep(2, 18, x) * (1 - smoothstep(98, 128, x));
+      const af = accessZ * accessX;
+      if (af > 0) h = lerp(h, 0.1, af);
+
       return Math.round(h / 0.9) * 0.9;
     }
 
@@ -142,10 +172,21 @@
     }
 
     zoneName(x, z) {
+      if (this.inPaddock(x, z)) return 'PADDOCK';
       if (x < -55) return 'MONTAGNA OFF-ROAD';
-      if (Math.abs(x) < 17 && Math.abs(z) < 535) return 'AUTOSTRADA INFINITA';
+      if (Math.abs(x) < 17) return 'AUTOSTRADA INFINITA';
       if (x > 35 && x < 345 && Math.abs(z) < 285) return 'CITTÀ NEON';
-      return 'PRATERIA';
+      return 'PRATERIA INFINITA';
+    }
+
+    inPaddock(x, z) {
+      const pad = Math.hypot(x - this.paddock.x, z - this.paddock.z) < this.paddock.triggerR;
+      const access = x > 8 && x < 142 && Math.abs(z - this.paddock.z) < 10;
+      return pad || access;
+    }
+
+    inPit(x, z) {
+      return Math.hypot(x - this.paddock.pit.x, z - this.paddock.pit.z) < this.paddock.pit.r;
     }
 
     build() {
@@ -157,7 +198,10 @@
       this.buildDragStrip();
       this.buildDriftZone();
       this.buildDelivery();
+      this.buildPaddock();
       this.buildWayfinding();
+      this.updateStreaming(this.spawns.free.x, this.spawns.free.z, true);
+      this.updateHighway(this.spawns.free.z, true);
     }
 
     /* --------------------------- cielo -------------------------- */
@@ -188,51 +232,120 @@
       this.sky = mesh;
     }
 
-    /* ------------------------- terreno ------------------------- */
+    /* ------------------------- terreno streaming ---------------- */
     buildTerrain() {
-      const size = 1200;
-      const segs = 220;
-      const geo = new THREE.PlaneGeometry(size, size, segs, segs);
-      geo.rotateX(-Math.PI / 2);
+      this.chunkGroup = new THREE.Group();
+      this.chunkGroup.name = 'terrain-stream';
+      this.scene.add(this.chunkGroup);
+      this._terrainColors = {
+        grass: new THREE.Color(0x76c95f),
+        grass2: new THREE.Color(0x4d8f4a),
+        rock: new THREE.Color(0x9a9270),
+        snow: new THREE.Color(0xe8f4ff),
+        dirt: new THREE.Color(0xb98a5a),
+        neon: new THREE.Color(0x2c3a55),
+        tmp: new THREE.Color()
+      };
+      const mat = new THREE.MeshStandardMaterial({
+        vertexColors: true, roughness: 1, metalness: 0, flatShading: true
+      });
+      const count = (this.chunkRadius * 2 + 1) * (this.chunkRadius * 2 + 1);
+      for (let i = 0; i < count; i++) {
+        const geo = new THREE.PlaneGeometry(this.chunkSize, this.chunkSize, this.chunkSegs, this.chunkSegs);
+        geo.rotateX(-Math.PI / 2);
+        const colors = new Float32Array(geo.attributes.position.count * 3);
+        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.receiveShadow = true;
+        mesh.frustumCulled = false;
+        mesh.visible = false;
+        mesh.userData.isTerrainChunk = true;
+        this.chunkGroup.add(mesh);
+        this.chunkPool.push({ mesh, geo, key: null });
+      }
+      this.terrainMesh = this.chunkGroup;
+    }
 
-      const pos = geo.attributes.position;
-      const colors = new Float32Array(pos.count * 3);
-      const cGrass = new THREE.Color(0x76c95f);
-      const cGrass2 = new THREE.Color(0x4d8f4a);
-      const cRock = new THREE.Color(0x9a9270);
-      const cSnow = new THREE.Color(0xe8f4ff);
-      const cDirt = new THREE.Color(0xb98a5a);
-      const cNeon = new THREE.Color(0x2c3a55);
-      const tmp = new THREE.Color();
+    buildChunk(slot, cx, cz) {
+      const size = this.chunkSize;
+      const originX = cx * size;
+      const originZ = cz * size;
+      const pos = slot.geo.attributes.position;
+      const colors = slot.geo.attributes.color;
+      const c = this._terrainColors;
+      const tmp = c.tmp;
 
       for (let i = 0; i < pos.count; i++) {
-        const x = pos.getX(i);
-        const z = pos.getZ(i);
+        const x = originX + pos.getX(i);
+        const z = originZ + pos.getZ(i);
         const h = this.heightAt(x, z);
         pos.setY(i, h);
 
         const t = clamp((h - 4) / 28, 0, 1);
-        if (x < -60 && h < 8) tmp.copy(cDirt).lerp(cRock, clamp(h / 18, 0, 1));
-        else if (t < 0.52) tmp.copy(cGrass).lerp(cGrass2, t / 0.52);
-        else tmp.copy(cRock).lerp(cSnow, (t - 0.52) / 0.48);
-        if (x > 35 && x < 340 && Math.abs(z) < 280) tmp.lerp(cNeon, 0.55);
-
+        if (x < -60 && h < 8) tmp.copy(c.dirt).lerp(c.rock, clamp(h / 18, 0, 1));
+        else if (t < 0.52) tmp.copy(c.grass).lerp(c.grass2, t / 0.52);
+        else tmp.copy(c.rock).lerp(c.snow, (t - 0.52) / 0.48);
+        if (x > 35 && x < 340 && Math.abs(z) < 280) tmp.lerp(c.neon, 0.55);
         const v = Math.sin(x * 0.7) * Math.cos(z * 0.6) * 0.04;
-        colors[i * 3] = clamp(tmp.r + v, 0, 1);
-        colors[i * 3 + 1] = clamp(tmp.g + v, 0, 1);
-        colors[i * 3 + 2] = clamp(tmp.b + v, 0, 1);
+        colors.setXYZ(i,
+          clamp(tmp.r + v, 0, 1),
+          clamp(tmp.g + v, 0, 1),
+          clamp(tmp.b + v, 0, 1));
       }
 
-      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-      geo.computeVertexNormals();
+      pos.needsUpdate = true;
+      colors.needsUpdate = true;
+      slot.geo.computeVertexNormals();
+      slot.geo.computeBoundingSphere();
+      slot.mesh.position.set(originX, 0, originZ);
+      slot.mesh.visible = true;
+      slot.key = cx + ',' + cz;
+    }
 
-      const mat = new THREE.MeshStandardMaterial({
-        vertexColors: true, roughness: 1, metalness: 0, flatShading: true
-      });
-      const terrain = new THREE.Mesh(geo, mat);
-      terrain.receiveShadow = true;
-      this.scene.add(terrain);
-      this.terrainMesh = terrain;
+    updateStreaming(x, z, force) {
+      const size = this.chunkSize;
+      const cx = Math.floor(x / size);
+      const cz = Math.floor(z / size);
+      if (!force && cx === this._cx && cz === this._cz) return;
+      this._cx = cx;
+      this._cz = cz;
+
+      const r = this.chunkRadius;
+      const needed = new Set();
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) needed.add((cx + dx) + ',' + (cz + dz));
+      }
+
+      const free = [];
+      for (const [key, slot] of this.activeChunks) {
+        if (!needed.has(key)) {
+          this.activeChunks.delete(key);
+          slot.key = null;
+          slot.mesh.visible = false;
+          free.push(slot);
+        }
+      }
+
+      for (const key of needed) {
+        if (this.activeChunks.has(key)) continue;
+        const slot = free.pop() || this.chunkPool.find((s) => !s.key);
+        if (!slot) continue;
+        const parts = key.split(',');
+        this.buildChunk(slot, Number(parts[0]), Number(parts[1]));
+        this.activeChunks.set(key, slot);
+      }
+    }
+
+    update(x, z) {
+      this._streamTime += 1;
+      this.updateStreaming(x, z);
+      this.updateHighway(z);
+      for (const m of this.paddock.mechanics) {
+        const t = this._streamTime * 0.035 + m.phase;
+        m.armL.rotation.z = 0.35 + Math.sin(t) * 0.22;
+        m.armR.rotation.z = -0.35 - Math.cos(t * 1.15) * 0.2;
+        m.group.position.y = m.baseY + Math.sin(t * 1.7) * 0.025;
+      }
     }
 
     addBox(w, h, d, x, y, z, color, opts) {
@@ -257,56 +370,93 @@
       this.colliders.push({ x, z, hw, hd, yaw: yaw || 0 });
     }
 
-    /* ------------------------- autostrada ---------------------- */
+    /* ------------------------- autostrada infinita ------------- */
     buildHighway() {
       this.roadMat = new THREE.MeshStandardMaterial({ color: 0x2b303b, roughness: 0.96 });
-      const road = new THREE.Mesh(new THREE.PlaneGeometry(26, 1090), this.roadMat);
+      this.highwayGroup = new THREE.Group();
+      this.highwayGroup.name = 'infinite-highway';
+      this.scene.add(this.highwayGroup);
+
+      const road = new THREE.Mesh(new THREE.PlaneGeometry(26, 2400), this.roadMat);
       road.rotation.x = -Math.PI / 2;
       road.position.set(0, 0.03, 0);
       road.receiveShadow = true;
-      this.scene.add(road);
+      this.highwayGroup.add(road);
 
       const edgeMat = new THREE.MeshStandardMaterial({ color: 0xe9eff8, roughness: 0.8 });
+      const railMat = new THREE.MeshStandardMaterial({ color: 0x27313f, roughness: 0.65, metalness: 0.25 });
       for (const x of [-12.55, 12.55]) {
-        const line = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.02, 1090), edgeMat);
+        const line = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.02, 2400), edgeMat);
         line.position.set(x, 0.06, 0);
-        this.scene.add(line);
+        this.highwayGroup.add(line);
+      }
+      for (const x of [-13.4, 13.4]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.55, 2400), railMat);
+        rail.position.set(x, 0.3, 0);
+        this.highwayGroup.add(rail);
       }
 
+      /* trattini riciclati: restano fissi nel mondo mentre l'auto avanza */
       const dashGeo = new THREE.BoxGeometry(0.22, 0.02, 4.4);
       const dashMat = new THREE.MeshStandardMaterial({ color: 0xd5dde9, roughness: 0.9 });
-      const dashes = new THREE.InstancedMesh(dashGeo, dashMat, 3 * 76);
-      const dummy = new THREE.Object3D();
-      let i = 0;
-      for (const x of [-6.5, 0, 6.5]) {
-        for (let z = -510; z <= 510; z += 14) {
-          dummy.position.set(x, 0.065, z);
-          dummy.rotation.set(0, 0, 0);
-          dummy.scale.set(1, 1, 1);
-          dummy.updateMatrix();
-          dashes.setMatrixAt(i++, dummy.matrix);
-        }
-      }
-      dashes.count = i;
-      dashes.instanceMatrix.needsUpdate = true;
+      this.highwayDashCount = 160;
+      const dashes = new THREE.InstancedMesh(dashGeo, dashMat, 3 * this.highwayDashCount);
+      dashes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      dashes.frustumCulled = false;
+      this.highwayDashes = dashes;
       this.scene.add(dashes);
 
-      /* lampioni neon autostrada */
+      /* lampioni neon autostrada, anch'essi in streaming */
       const lampGeo = new THREE.BoxGeometry(0.28, 7.5, 0.28);
       const lampMat = new THREE.MeshStandardMaterial({
         color: 0x27313f, emissive: 0x5ee7ff, emissiveIntensity: 0.35, roughness: 0.5
       });
-      const lamps = new THREE.InstancedMesh(lampGeo, lampMat, 44);
-      for (let k = 0; k < 44; k++) {
-        const side = k % 2 === 0 ? -1 : 1;
-        dummy.position.set(side * 13.6, 3.6, -500 + Math.floor(k / 2) * 48);
-        dummy.rotation.set(0, 0, 0);
-        dummy.scale.set(1, 1, 1);
-        dummy.updateMatrix();
-        lamps.setMatrixAt(k, dummy.matrix);
-      }
-      lamps.instanceMatrix.needsUpdate = true;
+      this.highwayLampCount = 72;
+      const lamps = new THREE.InstancedMesh(lampGeo, lampMat, this.highwayLampCount);
+      lamps.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      lamps.frustumCulled = false;
+      this.highwayLamps = lamps;
       this.scene.add(lamps);
+    }
+
+    updateHighway(z, force) {
+      if (!this.highwayGroup) return;
+      this.highwayGroup.position.z = z;
+
+      const dashSteps = this.highwayDashCount;
+      if (force || this._lastDashZ === null || Math.abs(z - this._lastDashZ) > 3) {
+        const start = Math.floor((z - 1120) / 14) * 14;
+        const dummy = this._dashDummy || (this._dashDummy = new THREE.Object3D());
+        let i = 0;
+        for (const x of [-6.5, 0, 6.5]) {
+          for (let k = 0; k < dashSteps; k++) {
+            dummy.position.set(x, 0.065, start + k * 14);
+            dummy.rotation.set(0, 0, 0);
+            dummy.scale.set(1, 1, 1);
+            dummy.updateMatrix();
+            this.highwayDashes.setMatrixAt(i++, dummy.matrix);
+          }
+        }
+        this.highwayDashes.count = i;
+        this.highwayDashes.instanceMatrix.needsUpdate = true;
+        this._lastDashZ = z;
+      }
+
+      if (force || this._lastLampZ === null || Math.abs(z - this._lastLampZ) > 8) {
+        const lampSpan = Math.floor(this.highwayLampCount / 2) * 48;
+        const start = Math.floor((z - lampSpan / 2) / 48) * 48;
+        const dummy = this._dashDummy || (this._dashDummy = new THREE.Object3D());
+        for (let k = 0; k < this.highwayLampCount; k++) {
+          const side = k % 2 === 0 ? -1 : 1;
+          dummy.position.set(side * 13.6, 3.6, start + Math.floor(k / 2) * 48);
+          dummy.rotation.set(0, 0, 0);
+          dummy.scale.set(1, 1, 1);
+          dummy.updateMatrix();
+          this.highwayLamps.setMatrixAt(k, dummy.matrix);
+        }
+        this.highwayLamps.instanceMatrix.needsUpdate = true;
+        this._lastLampZ = z;
+      }
     }
 
     /* ---------------------------- città ------------------------ */
@@ -804,6 +954,197 @@
         beam.position.set(p.x, h + 8, p.z);
         this.scene.add(beam);
         this.checkpointMeshes.push(beam);
+      }
+    }
+
+    /* ---------------------- paddock / lobby fisica -------------- */
+    makeBannerTexture(text, colorHex) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      const color = '#' + colorHex.toString(16).padStart(6, '0');
+      ctx.fillStyle = '#0b1220';
+      ctx.fillRect(0, 0, 512, 128);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 7;
+      ctx.strokeRect(7, 7, 498, 114);
+      ctx.fillStyle = color;
+      ctx.font = 'bold 58px ui-sans-serif, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, 256, 68);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.needsUpdate = true;
+      return tex;
+    }
+
+    makeMechanic(x, z, yaw, suitColor, helmetColor) {
+      const g = new THREE.Group();
+      const suit = new THREE.MeshStandardMaterial({ color: suitColor, roughness: 0.78, flatShading: true });
+      const dark = new THREE.MeshStandardMaterial({ color: 0x202733, roughness: 0.8, flatShading: true });
+      const skin = new THREE.MeshStandardMaterial({ color: 0xd7a06e, roughness: 0.9, flatShading: true });
+      const helmet = new THREE.MeshStandardMaterial({ color: helmetColor, roughness: 0.45, metalness: 0.1, flatShading: true });
+      const add = (geo, mat, px, py, pz) => {
+        const m = new THREE.Mesh(geo, mat);
+        m.position.set(px, py, pz);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        g.add(m);
+        return m;
+      };
+      add(new THREE.BoxGeometry(0.2, 0.62, 0.24), dark, -0.16, 0.31, 0);
+      add(new THREE.BoxGeometry(0.2, 0.62, 0.24), dark, 0.16, 0.31, 0);
+      add(new THREE.BoxGeometry(0.58, 0.7, 0.32), suit, 0, 0.96, 0);
+      add(new THREE.BoxGeometry(0.3, 0.3, 0.3), skin, 0, 1.47, 0);
+      add(new THREE.BoxGeometry(0.36, 0.2, 0.36), helmet, 0, 1.66, 0);
+      add(new THREE.BoxGeometry(0.36, 0.06, 0.38), helmet, 0, 1.58, 0.01);
+      const armL = new THREE.Group();
+      armL.position.set(-0.38, 1.22, 0);
+      const armLMesh = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.58, 0.18), suit);
+      armLMesh.position.y = -0.27;
+      armLMesh.castShadow = true;
+      armL.add(armLMesh);
+      g.add(armL);
+      const armR = new THREE.Group();
+      armR.position.set(0.38, 1.22, 0);
+      const armRMesh = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.58, 0.18), suit);
+      armRMesh.position.y = -0.27;
+      armRMesh.castShadow = true;
+      armR.add(armRMesh);
+      g.add(armR);
+      const baseY = this.heightAt(x, z);
+      g.position.set(x, baseY, z);
+      g.rotation.y = yaw;
+      this.scene.add(g);
+      this.paddock.mechanics.push({ group: g, armL, armR, baseY, phase: this.rand() * Math.PI * 2 });
+    }
+
+    buildPaddock() {
+      const p = this.paddock;
+      const asphalt = new THREE.MeshStandardMaterial({ color: 0x252c38, roughness: 0.94 });
+      const dark = new THREE.MeshStandardMaterial({ color: 0x151b25, roughness: 0.8, metalness: 0.15 });
+      const neon = new THREE.MeshStandardMaterial({
+        color: 0x57e39b, emissive: 0x57e39b, emissiveIntensity: 0.85, roughness: 0.4
+      });
+      const cyan = new THREE.MeshStandardMaterial({
+        color: 0x5ee7ff, emissive: 0x5ee7ff, emissiveIntensity: 0.9, roughness: 0.4
+      });
+
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(p.padW, 0.12, p.padD), asphalt);
+      pad.position.set(p.x, 0.06, p.z);
+      pad.receiveShadow = true;
+      this.scene.add(pad);
+
+      const access = new THREE.Mesh(new THREE.BoxGeometry(96, 0.1, 11), asphalt);
+      access.position.set(59, 0.05, p.z);
+      access.receiveShadow = true;
+      this.scene.add(access);
+
+      /* corsie e box pit */
+      for (let i = 0; i < 4; i++) {
+        const z = p.z - 15 + i * 10;
+        const line = new THREE.Mesh(new THREE.BoxGeometry(p.padW - 8, 0.03, 0.12), neon);
+        line.position.set(p.x, 0.135, z);
+        this.scene.add(line);
+      }
+      for (const x of [70, 95, 120]) {
+        const box = new THREE.Mesh(new THREE.BoxGeometry(15, 0.035, 7), dark);
+        box.position.set(x, 0.13, p.z - 8);
+        this.scene.add(box);
+        const outline = new THREE.Mesh(new THREE.BoxGeometry(15.4, 0.02, 0.12), cyan);
+        outline.position.set(x, 0.15, p.z - 11.5);
+        this.scene.add(outline);
+      }
+
+      /* garage */
+      const gh = p.garage;
+      const garage = this.addBox(gh.w, gh.h, gh.d, gh.x, gh.h / 2, gh.z, 0x202836, {
+        roughness: 0.65, metalness: 0.25
+      });
+      garage.castShadow = true;
+      this.addBox(gh.w + 2, 0.5, gh.d + 2, gh.x, gh.h + 0.25, gh.z, 0x39465a, { roughness: 0.5, metalness: 0.35 });
+      this.addCollider(gh.x, gh.z, gh.w / 2, gh.d / 2, 0);
+      for (const x of [70, 95, 120]) {
+        const door = new THREE.Mesh(new THREE.BoxGeometry(15, 4.2, 0.2), new THREE.MeshStandardMaterial({
+          color: 0x0d1520, roughness: 0.3, metalness: 0.45, emissive: 0x142a35, emissiveIntensity: 0.5
+        }));
+        door.position.set(x, 2.25, gh.z + gh.d / 2 + 0.11);
+        this.scene.add(door);
+        const strip = new THREE.Mesh(new THREE.BoxGeometry(13.5, 0.1, 0.08), neon);
+        strip.position.set(x, 4.35, gh.z + gh.d / 2 + 0.23);
+        this.scene.add(strip);
+      }
+
+      /* insegna PADDOCK sopra il garage */
+      const banner = new THREE.Mesh(
+        new THREE.PlaneGeometry(22, 5.5),
+        new THREE.MeshBasicMaterial({ map: this.makeBannerTexture('VOXEL PADDOCK', 0x57e39b), side: THREE.DoubleSide })
+      );
+      banner.position.set(gh.x, gh.h + 3.2, gh.z + gh.d / 2 + 0.3);
+      this.scene.add(banner);
+
+      /* arco d'ingresso sull'accesso */
+      for (const z of [p.z - 7, p.z + 7]) {
+        this.addBox(0.8, 7.5, 0.8, 38, 3.75, z, 0x1b2430, { metalness: 0.35 });
+        this.addCollider(38, z, 0.4, 0.4, 0);
+      }
+      this.addBox(0.9, 0.7, 15.6, 38, 7.5, p.z, 0x1b2430, { metalness: 0.35 });
+      const gateSign = new THREE.Mesh(
+        new THREE.PlaneGeometry(10, 2.5),
+        new THREE.MeshBasicMaterial({ map: this.makeBannerTexture('PADDOCK', 0xffd166), side: THREE.DoubleSide })
+      );
+      gateSign.position.set(38.55, 6.5, p.z);
+      gateSign.rotation.y = -Math.PI / 2;
+      this.scene.add(gateSign);
+
+      /* piazzola servizio gomme / meccanici */
+      const pitPad = new THREE.Mesh(new THREE.BoxGeometry(10, 0.05, 6), new THREE.MeshStandardMaterial({
+        color: 0x12303a, emissive: 0x2fa8c9, emissiveIntensity: 0.3, roughness: 0.5
+      }));
+      pitPad.position.set(p.pit.x, 0.15, p.pit.z);
+      this.scene.add(pitPad);
+      const pitSign = new THREE.Mesh(
+        new THREE.PlaneGeometry(5.2, 2.2),
+        new THREE.MeshBasicMaterial({ map: this.makeBannerTexture('PIT', 0x5ee7ff), side: THREE.DoubleSide })
+      );
+      pitSign.position.set(p.pit.x, 3.2, p.pit.z + 4);
+      this.scene.add(pitSign);
+      this.addBox(0.18, 2.8, 0.18, p.pit.x - 2.6, 1.4, p.pit.z + 4, 0x27313f);
+      this.addBox(0.18, 2.8, 0.18, p.pit.x + 2.6, 1.4, p.pit.z + 4, 0x27313f);
+
+      /* auto in esposizione: F1, supercar, pick-up */
+      const defs = VD.CAR_DEFS || {};
+      const show = [defs.f1, defs.supercar, defs.pickup].filter(Boolean);
+      const spots = [70, 95, 120];
+      if (VD.buildCar) {
+        for (let i = 0; i < show.length; i++) {
+          const def = show[i];
+          const car = VD.buildCar(def.color, { def, simple: true });
+          const x = spots[i];
+          const z = p.z - 5;
+          car.position.set(x, this.heightAt(x, z) + 0.04, z);
+          car.rotation.y = 0;
+          this.scene.add(car);
+          this.paddock.cars.push(car);
+          this.addCollider(x, z, 1.1, 2.3, 0);
+        }
+      }
+
+      /* meccanici animati */
+      this.makeMechanic(83, p.z + 2, 0.2, 0xff2b3d, 0xffd166);
+      this.makeMechanic(107, p.z + 2, -0.2, 0x57e39b, 0xf2f5ff);
+      this.makeMechanic(95, p.z + 9, Math.PI, 0xffd166, 0xff2b3d);
+      this.makeMechanic(65, p.z - 1, 0.6, 0x5ee7ff, 0x1b2430);
+      this.makeMechanic(127, p.z - 1, -0.6, 0xff8fb1, 0xf2f5ff);
+
+      /* bandiere e luci */
+      for (const x of [55, 135]) {
+        this.addBox(0.16, 5, 0.16, x, 2.5, p.z - 20, 0x27313f);
+        const flag = this.addBox(2.4, 1.2, 0.08, x + 1.2, 4.3, p.z - 20, 0x57e39b, {
+          emissive: 0x57e39b, emissiveIntensity: 0.4
+        });
+        flag.castShadow = false;
       }
     }
 
